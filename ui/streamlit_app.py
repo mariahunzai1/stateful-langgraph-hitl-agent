@@ -157,8 +157,6 @@ if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "current_response" not in st.session_state:
     st.session_state["current_response"] = None
-if "pending_prompt" not in st.session_state:
-    st.session_state["pending_prompt"] = None
 
 # Ensure Backend Availability
 backend_online = ensure_backend_running(API_BASE_URL)
@@ -166,6 +164,8 @@ health_info = api_get_health() if backend_online else None
 
 
 # --- Sidebar (Placed Above Main Workspace & Tabs) ---
+
+demo_prompt: str | None = None
 
 with st.sidebar:
     st.title("🛡️ Operator Console")
@@ -189,7 +189,6 @@ with st.sidebar:
             st.session_state["thread_id"] = new_id
             st.session_state["chat_history"] = []
             st.session_state["current_response"] = None
-            st.session_state["pending_prompt"] = None
             st.rerun()
     with col_t2:
         if st.button("Sync State", use_container_width=True):
@@ -203,24 +202,20 @@ with st.sidebar:
 
     st.divider()
 
-    # 1-Click Demo Scenarios (Immediate Trigger with st.rerun)
+    # 1-Click Demo Scenarios (Unified Input Flow)
     st.subheader("🎯 1-Click Demo Scenarios")
 
     if st.button("1. Read-Only Customer Lookup", use_container_width=True):
-        st.session_state["pending_prompt"] = "What is the status of Alice Chen's recent order (cust_001)?"
-        st.rerun()
+        demo_prompt = "What is the status of Alice Chen's recent order (cust_001)?"
 
     if st.button("2. Eligible Refund (Triggers HITL)", use_container_width=True):
-        st.session_state["pending_prompt"] = "Please issue a full refund for order ord_101 ($150.00) due to damaged merchandise."
-        st.rerun()
+        demo_prompt = "Please issue a full refund for order ord_101 ($150.00) due to damaged merchandise."
 
     if st.button("3. Partial Refund Edit Scenario", use_container_width=True):
-        st.session_state["pending_prompt"] = "Issue a $150.00 refund for order ord_101."
-        st.rerun()
+        demo_prompt = "Issue a $150.00 refund for order ord_101."
 
     if st.button("4. Expired Order Policy Check", use_container_width=True):
-        st.session_state["pending_prompt"] = "Check the refund policy and refund order ord_102 ($45.00)."
-        st.rerun()
+        demo_prompt = "Check the refund policy and refund order ord_102 ($45.00)."
 
     st.divider()
 
@@ -230,28 +225,10 @@ with st.sidebar:
         if api_reset_ops_data():
             st.session_state["chat_history"] = []
             st.session_state["current_response"] = None
-            st.session_state["pending_prompt"] = None
             st.toast("Operational database reset and re-seeded!")
             st.rerun()
         else:
             st.error("Failed to reset database.")
-
-
-# --- Immediate Execution for 1-Click Scenarios ---
-
-if st.session_state.get("pending_prompt"):
-    prompt_to_run = st.session_state.pop("pending_prompt")
-    st.session_state["chat_history"].append({"role": "user", "content": prompt_to_run})
-    with st.spinner("Agent deliberating and inspecting operational policy..."):
-        resp = api_run_agent(st.session_state["thread_id"], prompt_to_run)
-        if resp:
-            st.session_state["current_response"] = resp
-            st.session_state["chat_history"].append({
-                "role": "assistant",
-                "content": resp.get("assistant_message", ""),
-                "tool_trace": resp.get("tool_trace", []),
-            })
-    st.rerun()
 
 
 # --- Main Workspace ---
@@ -266,109 +243,111 @@ tab_chat, tab_ledger = st.tabs(["💬 Agent & HITL Console", "📊 Live Operatio
 # --- TAB 1: Chat & HITL Approval Console ---
 
 with tab_chat:
-    # Render Conversation History
-    for msg in st.session_state["chat_history"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if "tool_trace" in msg and msg["tool_trace"]:
-                with st.expander(f"Tool Trace ({len(msg['tool_trace'])} hops)", expanded=False):
-                    for hop in msg["tool_trace"]:
-                        t_name = hop.get("tool", "unknown")
-                        is_high_risk = t_name in ("issue_refund", "update_subscription_tier")
-                        risk_badge = "🔴 HIGH_RISK" if is_high_risk else "🟢 READ_ONLY"
-                        st.markdown(f"**`{t_name}`** `{risk_badge}`")
-                        st.json({"arguments": hop.get("args"), "result": hop.get("result")})
+    chat_container = st.container()
+    with chat_container:
+        # Render Conversation History
+        for msg in st.session_state["chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if "tool_trace" in msg and msg["tool_trace"]:
+                    with st.expander(f"Tool Trace ({len(msg['tool_trace'])} hops)", expanded=False):
+                        for hop in msg["tool_trace"]:
+                            t_name = hop.get("tool", "unknown")
+                            is_high_risk = t_name in ("issue_refund", "update_subscription_tier")
+                            risk_badge = "🔴 HIGH_RISK" if is_high_risk else "🟢 READ_ONLY"
+                            st.markdown(f"**`{t_name}`** `{risk_badge}`")
+                            st.json({"arguments": hop.get("args"), "result": hop.get("result")})
 
-    # Render Current Turn / Paused Approval Gate
-    cur = st.session_state["current_response"]
+        # Render Current Turn / Paused Approval Gate
+        cur = st.session_state["current_response"]
 
-    if cur and cur.get("status") == "awaiting_approval":
-        pending = cur.get("pending_approval") or {}
-        tool_name = pending.get("tool_name", "high_risk_tool")
-        tool_args = pending.get("tool_args", {})
-        policy_summary = pending.get("policy_summary", "")
+        if cur and cur.get("status") == "awaiting_approval":
+            pending = cur.get("pending_approval") or {}
+            tool_name = pending.get("tool_name", "high_risk_tool")
+            tool_args = pending.get("tool_args", {})
+            policy_summary = pending.get("policy_summary", "")
 
-        st.warning("⚠️ **Human Supervisor Authorization Required**")
-        with st.container(border=True):
-            st.subheader(f"Approval Gate: `{tool_name}`")
-            st.markdown(f"**Policy Summary:** {policy_summary}")
-            st.caption(f"Interrupt ID: `{pending.get('interrupt_id')}` • Created: `{pending.get('created_at')}`")
+            st.warning("⚠️ **Human Supervisor Authorization Required**")
+            with st.container(border=True):
+                st.subheader(f"Approval Gate: `{tool_name}`")
+                st.markdown(f"**Policy Summary:** {policy_summary}")
+                st.caption(f"Interrupt ID: `{pending.get('interrupt_id')}` • Created: `{pending.get('created_at')}`")
 
-            # Form for editing arguments or providing reviewer note
-            with st.form("approval_form"):
-                st.markdown("#### Review Arguments")
-                args_json = st.text_area(
-                    "Proposed Arguments (Edit JSON to modify parameters):",
-                    value=json.dumps(tool_args, indent=2),
-                    height=120,
-                )
-                reviewer_note = st.text_input(
-                    "Reviewer Note / Justification:",
-                    placeholder="e.g. Approved partial return per customer retention policy",
-                )
+                # Form for editing arguments or providing reviewer note
+                with st.form("approval_form"):
+                    st.markdown("#### Review Arguments")
+                    args_json = st.text_area(
+                        "Proposed Arguments (Edit JSON to modify parameters):",
+                        value=json.dumps(tool_args, indent=2),
+                        height=120,
+                    )
+                    reviewer_note = st.text_input(
+                        "Reviewer Note / Justification:",
+                        placeholder="e.g. Approved partial return per customer retention policy",
+                    )
 
-                col_a, col_e, col_r = st.columns(3)
-                with col_a:
-                    approve_btn = st.form_submit_button("✅ Approve", use_container_width=True, type="primary")
-                with col_e:
-                    edit_btn = st.form_submit_button("✏️ Edit & Approve", use_container_width=True)
-                with col_r:
-                    reject_btn = st.form_submit_button("❌ Reject", use_container_width=True)
+                    col_a, col_e, col_r = st.columns(3)
+                    with col_a:
+                        approve_btn = st.form_submit_button("✅ Approve", use_container_width=True, type="primary")
+                    with col_e:
+                        edit_btn = st.form_submit_button("✏️ Edit & Approve", use_container_width=True)
+                    with col_r:
+                        reject_btn = st.form_submit_button("❌ Reject", use_container_width=True)
 
-                if approve_btn:
-                    with st.spinner("Submitting approval..."):
-                        decision = {"decision": "approve", "reviewer_note": reviewer_note or "Approved by operator"}
-                        resp = api_resume_agent(st.session_state["thread_id"], decision)
-                        if resp:
-                            st.session_state["current_response"] = resp
-                            st.session_state["chat_history"].append({
-                                "role": "assistant",
-                                "content": resp.get("assistant_message", "Operation approved and executed."),
-                                "tool_trace": resp.get("tool_trace", []),
-                            })
-                            st.rerun()
-
-                if edit_btn:
-                    try:
-                        edited_dict = json.loads(args_json)
-                        with st.spinner("Submitting edited approval..."):
-                            decision = {
-                                "decision": "edit",
-                                "edited_args": edited_dict,
-                                "reviewer_note": reviewer_note or "Edited and approved by operator",
-                            }
+                    if approve_btn:
+                        with st.spinner("Submitting approval..."):
+                            decision = {"decision": "approve", "reviewer_note": reviewer_note or "Approved by operator"}
                             resp = api_resume_agent(st.session_state["thread_id"], decision)
                             if resp:
                                 st.session_state["current_response"] = resp
                                 st.session_state["chat_history"].append({
                                     "role": "assistant",
-                                    "content": resp.get("assistant_message", "Operation modified and executed."),
+                                    "content": resp.get("assistant_message", "Operation approved and executed."),
                                     "tool_trace": resp.get("tool_trace", []),
                                 })
                                 st.rerun()
-                    except json.JSONDecodeError:
-                        st.error("Invalid JSON format in edited arguments.")
 
-                if reject_btn:
-                    with st.spinner("Submitting rejection..."):
-                        decision = {"decision": "reject", "reviewer_note": reviewer_note or "Rejected by supervisor"}
-                        resp = api_resume_agent(st.session_state["thread_id"], decision)
-                        if resp:
-                            st.session_state["current_response"] = resp
-                            st.session_state["chat_history"].append({
-                                "role": "assistant",
-                                "content": resp.get("assistant_message", "Operation rejected by supervisor."),
-                                "tool_trace": resp.get("tool_trace", []),
-                            })
-                            st.rerun()
+                    if edit_btn:
+                        try:
+                            edited_dict = json.loads(args_json)
+                            with st.spinner("Submitting edited approval..."):
+                                decision = {
+                                    "decision": "edit",
+                                    "edited_args": edited_dict,
+                                    "reviewer_note": reviewer_note or "Edited and approved by operator",
+                                }
+                                resp = api_resume_agent(st.session_state["thread_id"], decision)
+                                if resp:
+                                    st.session_state["current_response"] = resp
+                                    st.session_state["chat_history"].append({
+                                        "role": "assistant",
+                                        "content": resp.get("assistant_message", "Operation modified and executed."),
+                                        "tool_trace": resp.get("tool_trace", []),
+                                    })
+                                    st.rerun()
+                        except json.JSONDecodeError:
+                            st.error("Invalid JSON format in edited arguments.")
 
-    # Render Post-Tool Verification Card
-    if cur and cur.get("verification"):
-        v = cur["verification"]
-        if v.get("verified"):
-            st.success(f"🔍 **Deterministic Post-Tool Verification Passed** (`{v.get('tool_name')}`)")
-        else:
-            st.error(f"❌ **Verification Failed**: {v.get('discrepancy')}")
+                    if reject_btn:
+                        with st.spinner("Submitting rejection..."):
+                            decision = {"decision": "reject", "reviewer_note": reviewer_note or "Rejected by supervisor"}
+                            resp = api_resume_agent(st.session_state["thread_id"], decision)
+                            if resp:
+                                st.session_state["current_response"] = resp
+                                st.session_state["chat_history"].append({
+                                    "role": "assistant",
+                                    "content": resp.get("assistant_message", "Operation rejected by supervisor."),
+                                    "tool_trace": resp.get("tool_trace", []),
+                                })
+                                st.rerun()
+
+        # Render Post-Tool Verification Card
+        if cur and cur.get("verification"):
+            v = cur["verification"]
+            if v.get("verified"):
+                st.success(f"🔍 **Deterministic Post-Tool Verification Passed** (`{v.get('tool_name')}`)")
+            else:
+                st.error(f"❌ **Verification Failed**: {v.get('discrepancy')}")
 
 
 # --- TAB 2: Live Operations Ledger & Audit Trail ---
@@ -414,18 +393,25 @@ with tab_ledger:
         st.warning("Could not fetch operational database snapshot from backend.")
 
 
-# --- Root-Level Chat Input (Permanently Anchored to Bottom of Viewport) ---
+# --- Unified Input & Execution Flow ---
 
-user_prompt = st.chat_input("Enter customer request or command...")
-if user_prompt:
-    st.session_state["chat_history"].append({"role": "user", "content": user_prompt})
-    with st.spinner("Agent deliberating and inspecting operational policy..."):
-        resp = api_run_agent(st.session_state["thread_id"], user_prompt)
-        if resp:
-            st.session_state["current_response"] = resp
-            st.session_state["chat_history"].append({
-                "role": "assistant",
-                "content": resp.get("assistant_message", ""),
-                "tool_trace": resp.get("tool_trace", []),
-            })
+typed_prompt = st.chat_input("Enter customer request or command...")
+active_prompt = typed_prompt or demo_prompt
+
+if active_prompt:
+    st.session_state["chat_history"].append({"role": "user", "content": active_prompt})
+    with chat_container:
+        with st.chat_message("user"):
+            st.markdown(active_prompt)
+        with st.chat_message("assistant"):
+            with st.spinner("Agent deliberating and inspecting operational policy..."):
+                resp = api_run_agent(st.session_state["thread_id"], active_prompt)
+                if resp:
+                    st.session_state["current_response"] = resp
+                    st.session_state["chat_history"].append({
+                        "role": "assistant",
+                        "content": resp.get("assistant_message", ""),
+                        "tool_trace": resp.get("tool_trace", []),
+                    })
+                    st.markdown(resp.get("assistant_message", ""))
     st.rerun()
