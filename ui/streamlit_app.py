@@ -157,6 +157,14 @@ if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "current_response" not in st.session_state:
     st.session_state["current_response"] = None
+if "queued_prompt" not in st.session_state:
+    st.session_state["queued_prompt"] = None
+
+
+def queue_demo_prompt(prompt_text: str) -> None:
+    """Callback to stage a 1-click demo prompt for immediate turn execution."""
+    st.session_state["queued_prompt"] = prompt_text
+
 
 # Ensure Backend Availability
 backend_online = ensure_backend_running(API_BASE_URL)
@@ -164,8 +172,6 @@ health_info = api_get_health() if backend_online else None
 
 
 # --- Sidebar (Placed Above Main Workspace & Tabs) ---
-
-demo_prompt: str | None = None
 
 with st.sidebar:
     st.title("🛡️ Operator Console")
@@ -189,6 +195,7 @@ with st.sidebar:
             st.session_state["thread_id"] = new_id
             st.session_state["chat_history"] = []
             st.session_state["current_response"] = None
+            st.session_state["queued_prompt"] = None
             st.rerun()
     with col_t2:
         if st.button("Sync State", use_container_width=True):
@@ -202,20 +209,36 @@ with st.sidebar:
 
     st.divider()
 
-    # 1-Click Demo Scenarios (Unified Input Flow)
+    # 1-Click Demo Scenarios (Callback-based Immediate Execution)
     st.subheader("🎯 1-Click Demo Scenarios")
 
-    if st.button("1. Read-Only Customer Lookup", use_container_width=True):
-        demo_prompt = "What is the status of Alice Chen's recent order (cust_001)?"
+    st.button(
+        "1. Read-Only Customer Lookup",
+        use_container_width=True,
+        on_click=queue_demo_prompt,
+        args=("What is the status of Alice Chen's recent order (cust_001)?",),
+    )
 
-    if st.button("2. Eligible Refund (Triggers HITL)", use_container_width=True):
-        demo_prompt = "Please issue a full refund for order ord_101 ($150.00) due to damaged merchandise."
+    st.button(
+        "2. Eligible Refund (Triggers HITL)",
+        use_container_width=True,
+        on_click=queue_demo_prompt,
+        args=("Please issue a full refund for order ord_101 ($150.00) due to damaged merchandise.",),
+    )
 
-    if st.button("3. Partial Refund Edit Scenario", use_container_width=True):
-        demo_prompt = "Issue a $150.00 refund for order ord_101."
+    st.button(
+        "3. Partial Refund Edit Scenario",
+        use_container_width=True,
+        on_click=queue_demo_prompt,
+        args=("Issue a $150.00 refund for order ord_101.",),
+    )
 
-    if st.button("4. Expired Order Policy Check", use_container_width=True):
-        demo_prompt = "Check the refund policy and refund order ord_102 ($45.00)."
+    st.button(
+        "4. Expired Order Policy Check",
+        use_container_width=True,
+        on_click=queue_demo_prompt,
+        args=("Check the refund policy and refund order ord_102 ($45.00).",),
+    )
 
     st.divider()
 
@@ -225,6 +248,7 @@ with st.sidebar:
         if api_reset_ops_data():
             st.session_state["chat_history"] = []
             st.session_state["current_response"] = None
+            st.session_state["queued_prompt"] = None
             st.toast("Operational database reset and re-seeded!")
             st.rerun()
         else:
@@ -396,9 +420,10 @@ with tab_ledger:
 # --- Unified Input & Execution Flow ---
 
 typed_prompt = st.chat_input("Enter customer request or command...")
-active_prompt = typed_prompt or demo_prompt
+active_prompt = typed_prompt or st.session_state.get("queued_prompt")
 
 if active_prompt:
+    st.session_state["queued_prompt"] = None
     st.session_state["chat_history"].append({"role": "user", "content": active_prompt})
     with chat_container:
         with st.chat_message("user"):
