@@ -141,7 +141,7 @@ def api_reset_ops_data() -> bool:
         return False
 
 
-# --- Streamlit Application Layout ---
+# --- Streamlit Page Configuration ---
 
 st.set_page_config(
     page_title="LangGraph HITL Operations Console",
@@ -157,13 +157,15 @@ if "chat_history" not in st.session_state:
     st.session_state["chat_history"] = []
 if "current_response" not in st.session_state:
     st.session_state["current_response"] = None
+if "pending_prompt" not in st.session_state:
+    st.session_state["pending_prompt"] = None
 
 # Ensure Backend Availability
 backend_online = ensure_backend_running(API_BASE_URL)
 health_info = api_get_health() if backend_online else None
 
 
-# --- Sidebar ---
+# --- Sidebar (Placed Above Main Workspace & Tabs) ---
 
 with st.sidebar:
     st.title("🛡️ Operator Console")
@@ -187,6 +189,7 @@ with st.sidebar:
             st.session_state["thread_id"] = new_id
             st.session_state["chat_history"] = []
             st.session_state["current_response"] = None
+            st.session_state["pending_prompt"] = None
             st.rerun()
     with col_t2:
         if st.button("Sync State", use_container_width=True):
@@ -196,10 +199,11 @@ with st.sidebar:
                 st.toast("Thread state recovered from SQLite checkpoint!")
             else:
                 st.warning("No checkpoint found for this thread.")
+            st.rerun()
 
     st.divider()
 
-    # 1-Click Demo Scenarios
+    # 1-Click Demo Scenarios (Immediate Trigger with st.rerun)
     st.subheader("🎯 1-Click Demo Scenarios")
 
     if st.button("1. Read-Only Customer Lookup", use_container_width=True):
@@ -224,10 +228,30 @@ with st.sidebar:
     st.subheader("Database Governance")
     if st.button("🔄 Reset Demo Database", use_container_width=True, type="secondary"):
         if api_reset_ops_data():
+            st.session_state["chat_history"] = []
+            st.session_state["current_response"] = None
+            st.session_state["pending_prompt"] = None
             st.toast("Operational database reset and re-seeded!")
             st.rerun()
         else:
             st.error("Failed to reset database.")
+
+
+# --- Immediate Execution for 1-Click Scenarios ---
+
+if st.session_state.get("pending_prompt"):
+    prompt_to_run = st.session_state.pop("pending_prompt")
+    st.session_state["chat_history"].append({"role": "user", "content": prompt_to_run})
+    with st.spinner("Agent deliberating and inspecting operational policy..."):
+        resp = api_run_agent(st.session_state["thread_id"], prompt_to_run)
+        if resp:
+            st.session_state["current_response"] = resp
+            st.session_state["chat_history"].append({
+                "role": "assistant",
+                "content": resp.get("assistant_message", ""),
+                "tool_trace": resp.get("tool_trace", []),
+            })
+    st.rerun()
 
 
 # --- Main Workspace ---
@@ -346,34 +370,6 @@ with tab_chat:
         else:
             st.error(f"❌ **Verification Failed**: {v.get('discrepancy')}")
 
-    # Check for pending prompt from 1-click demos
-    prompt_to_run = None
-    if "pending_prompt" in st.session_state and st.session_state["pending_prompt"]:
-        prompt_to_run = st.session_state["pending_prompt"]
-        st.session_state["pending_prompt"] = None
-
-    user_input = st.chat_input("Enter customer request or command...") or prompt_to_run
-
-    if user_input:
-        # Record user message in UI history
-        st.session_state["chat_history"].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Agent deliberating and inspecting operational policy..."):
-                resp = api_run_agent(st.session_state["thread_id"], user_input)
-                if resp:
-                    st.session_state["current_response"] = resp
-                    asst_msg = resp.get("assistant_message", "")
-                    st.markdown(asst_msg)
-                    st.session_state["chat_history"].append({
-                        "role": "assistant",
-                        "content": asst_msg,
-                        "tool_trace": resp.get("tool_trace", []),
-                    })
-                    st.rerun()
-
 
 # --- TAB 2: Live Operations Ledger & Audit Trail ---
 
@@ -416,3 +412,20 @@ with tab_ledger:
             st.info("No audit logs recorded yet.")
     else:
         st.warning("Could not fetch operational database snapshot from backend.")
+
+
+# --- Root-Level Chat Input (Permanently Anchored to Bottom of Viewport) ---
+
+user_prompt = st.chat_input("Enter customer request or command...")
+if user_prompt:
+    st.session_state["chat_history"].append({"role": "user", "content": user_prompt})
+    with st.spinner("Agent deliberating and inspecting operational policy..."):
+        resp = api_run_agent(st.session_state["thread_id"], user_prompt)
+        if resp:
+            st.session_state["current_response"] = resp
+            st.session_state["chat_history"].append({
+                "role": "assistant",
+                "content": resp.get("assistant_message", ""),
+                "tool_trace": resp.get("tool_trace", []),
+            })
+    st.rerun()
