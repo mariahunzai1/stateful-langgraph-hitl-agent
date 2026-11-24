@@ -1,11 +1,13 @@
 # Stateful LangGraph Customer & Refund Operations Agent with HITL Governance
-App Live Demo: https://stateful-langgraph-hitl-agent-kigo9j8ipzmfbpcasbugzr.streamlit.app/
+
 [![Tests](https://img.shields.io/badge/pytest-37%20passed-brightgreen.svg)](#test-suite-offline-verification)
 [![Reliability Benchmark](https://img.shields.io/badge/HITL%20Benchmark-100%25%20Precision-blue.svg)](#automated-hitl-governance--reliability-benchmark)
 [![Stack](https://img.shields.io/badge/Stack-100%25%20%240%20Stack-orange.svg)](#dual-llm-compatibility-100-0-stack)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20REST-009688.svg)](#api-reference)
 [![Streamlit](https://img.shields.io/badge/Frontend-Streamlit%20Console-FF4B4B.svg)](#streamlit-operator-console)
 [![Author](https://img.shields.io/badge/Portfolio-mariahunzai1-purple.svg)](https://github.com/mariahunzai1)
+
+App Live Demo: https://stateful-langgraph-hitl-agent-kigo9j8ipzmfbpcasbugzr.streamlit.app/
 
 > **Portfolio Showcase (Project 2)** by **Maria Ali** ([`mariahunzai1`](https://github.com/mariahunzai1))  
 > A production-grade, stateful customer and refund operations agent built with **LangGraph**, **SQLite checkpoint persistence (`SqliteSaver`)**, **Human-in-the-Loop (`interrupt()`) authorization gates**, and **deterministic post-tool SQL verification** on a **100% $0 stack**.
