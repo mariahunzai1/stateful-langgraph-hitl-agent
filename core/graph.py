@@ -228,6 +228,7 @@ def build_graph(
                 content=last_message.content,
                 id=last_message.id,
                 tool_calls=patched_tool_calls,
+                additional_kwargs=dict(last_message.additional_kwargs or {}),
             )
             return {
                 "messages": [updated_ai_msg],

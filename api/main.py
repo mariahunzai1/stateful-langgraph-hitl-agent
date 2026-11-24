@@ -90,9 +90,11 @@ def run_agent(
     try:
         return agent_service.run_turn(req.thread_id, req.message)
     except Exception as exc:
+        err_body = getattr(exc, "body", None) or getattr(getattr(exc, "response", None), "text", None)
+        detail_msg = f"{exc} | Upstream detail: {err_body}" if err_body else str(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error executing agent turn: {str(exc)}",
+            detail=f"Error executing agent turn: {detail_msg}",
         )
 
 
@@ -108,9 +110,11 @@ def resume_agent(
             raise ValueError("No decision provided.")
         return agent_service.resume_turn(req.thread_id, decision)
     except Exception as exc:
+        err_body = getattr(exc, "body", None) or getattr(getattr(exc, "response", None), "text", None)
+        detail_msg = f"{exc} | Upstream detail: {err_body}" if err_body else str(exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error resuming agent turn: {str(exc)}",
+            detail=f"Error resuming agent turn: {detail_msg}",
         )
 
 
